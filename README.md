@@ -25,7 +25,7 @@ espota.exe: error: argument -p/--port: invalid int value: '{upload.port.properti
 | 项 | 说明 |
 |---|---|
 | 芯片 | **ESP32 全系 + ESP8266**（都用官方 espota） |
-| 端口 | 自动选（ESP32 → 3232，ESP8266 → 8266），也可手动指定 |
+| 端口 | 按 IP 自动识别芯片（查 `arduino-cli board list`）：ESP32 → 3232，ESP8266 → 8266；识别不到时先试 3232，失败自动换 8266 重试 |
 | 密码 | 上传时随 IP 一起询问，记住上次输入；认证失败会再给一次机会 |
 | 入口 | 状态栏按钮 / 命令面板 / 快捷键 |
 | 进度 | 状态栏百分比 + 通知区进度条 |

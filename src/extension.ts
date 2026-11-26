@@ -74,6 +74,40 @@ function findPython(): string {
   return process.platform === 'win32' ? 'python' : 'python3';
 }
 
+function findArduinoCli(): string | undefined {
+  const c = 'C:\\Program Files\\Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe';
+  if (fs.existsSync(c)) return c;
+  return 'arduino-cli';
+}
+
+/**
+ * 按 IP 查芯片型号，决定 OTA 端口。
+ * ESP8266 用 8266，ESP32 用 3232；猜错端口 espota 会重试 10 次（约 100 秒）。
+ * `arduino-cli board list` 不受 IDE 运行影响，能直接给出 IP → FQBN 的映射。
+ */
+async function detectPortForIp(ip: string): Promise<number | undefined> {
+  const cli = findArduinoCli();
+  if (!cli) return undefined;
+  const r = await run(cli, ['board', 'list', '--format', 'json']);
+  if (r.code !== 0) {
+    log(`board list 失败: ${r.code}`);
+    return undefined;
+  }
+  try {
+    const j = JSON.parse(r.out);
+    for (const p of j.detected_ports ?? []) {
+      if ((p.port?.address ?? '') !== ip) continue;
+      const fqbn: string = p.matching_boards?.[0]?.fqbn ?? '';
+      log(`芯片识别: ${ip} → ${fqbn || '(未知)'}`);
+      if (fqbn.includes('esp8266')) return 8266;
+      if (fqbn.includes('esp32')) return 3232;
+    }
+  } catch (e) {
+    log(`board list 解析失败: ${e}`);
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------- sketch 定位
 
 function pickSketch(api: ArduinoContext | undefined): SketchFolder | undefined {
@@ -237,7 +271,6 @@ async function upload(ctx: vscode.ExtensionContext) {
     const cfg = vscode.workspace.getConfiguration('espOta');
     let password = ctx.globalState.get<string>(STATE_PWD) ?? cfg.get<string>('password', '');
     const portCfg = cfg.get<number>('port', 0);
-    const port = portCfg > 0 ? portCfg : defaultPortFor(sketch);
 
     const fw = findFirmware(sketch.sketchPath, sketch.compileSummary);
     if (!fw) {
@@ -262,11 +295,11 @@ async function upload(ctx: vscode.ExtensionContext) {
     if (pwdInput === undefined) return;
     password = pwdInput;
 
-    const doUpload = async (pwd: string) => {
-      const args = ['-i', ip, '-p', String(port), '-r', '-f', fw];
+    const doUpload = async (pwd: string, usePort: number) => {
+      const args = ['-i', ip, '-p', String(usePort), '-r', '-f', fw];
       if (pwd) args.splice(4, 0, '-a', pwd);
 
-      log(`目标: ${ip}:${port}${pwd ? '  (带密码)' : '  (无密码)'}`);
+      log(`目标: ${ip}:${usePort}${pwd ? '  (带密码)' : '  (无密码)'}`);
       log(`执行: ${espota.exe} ${args.join(' ')}`);
 
       const exe = espota.isPy ? findPython() : espota.exe;
@@ -274,7 +307,7 @@ async function upload(ctx: vscode.ExtensionContext) {
 
       let lastPct = -1;
       const res = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: `OTA → ${ip}`, cancellable: false },
+        { location: vscode.ProgressLocation.Notification, title: `OTA → ${ip}:${usePort}`, cancellable: false },
         (progress) =>
           new Promise<{ code: number; out: string }>((resolve) => {
             progress.report({ message: '连接中…' });
@@ -309,7 +342,30 @@ async function upload(ctx: vscode.ExtensionContext) {
       return res;
     };
 
-    let result = await doUpload(password);
+    // 端口优先级：设置里的固定值 > 该 IP 上次成功的端口 > 按芯片自动识别 > 默认 3232
+    const otherPort = (p: number) => (p === 8266 ? 3232 : 8266);
+    let port = portCfg > 0 ? portCfg : ctx.globalState.get<number>(`espOta.port.${ip}`, 0);
+    if (!port) {
+      port = (await detectPortForIp(ip)) ?? defaultPortFor(sketch);
+      log(`自动选择端口: ${port}`);
+    } else {
+      log(`使用端口: ${port}${portCfg > 0 ? '（设置固定）' : '（该 IP 上次成功过）'}`);
+    }
+
+    let result = await doUpload(password, port);
+
+    // 端口猜错：espota 会重试 10 次（约 100 秒）才报 No response。换另一个端口再试。
+    if (result.code !== 0 && /No response|Sending invitation/i.test(result.out) && portCfg === 0) {
+      const alt = otherPort(port);
+      log(`端口 ${port} 无响应，改用 ${alt} 重试`);
+      setStatus('$(sync~spin) OTA 换端口', `${port} 无响应，试 ${alt}`);
+      const altResult = await doUpload(password, alt);
+      if (altResult.code === 0) {
+        await ctx.globalState.update(`espOta.port.${ip}`, alt);
+        result = altResult;
+        port = alt;
+      }
+    }
 
     // 认证失败 → 要密码后重试一次
     if (result.code !== 0 && isAuthFailure(result.out)) {
@@ -320,7 +376,11 @@ async function upload(ctx: vscode.ExtensionContext) {
         return;
       }
       password = pwd;
-      result = await doUpload(pwd);
+      result = await doUpload(pwd, port);
+    }
+
+    if (result.code === 0) {
+      await ctx.globalState.update(`espOta.port.${ip}`, port);
     }
 
     log(`退出码: ${result.code}`);

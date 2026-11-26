@@ -2,7 +2,7 @@
   "name": "esp-ota-uploader",
   "displayName": "ESP OTA Uploader",
   "description": "Upload sketches to ESP32 / ESP8266 over ArduinoOTA with a manually specified IP. Works without mDNS discovery.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "local",
   "license": "MIT",
   "engines": {

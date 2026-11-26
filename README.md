@@ -26,7 +26,7 @@ espota.exe: error: argument -p/--port: invalid int value: '{upload.port.properti
 |---|---|
 | 芯片 | **ESP32 全系 + ESP8266**（都用官方 espota） |
 | 端口 | 自动选（ESP32 → 3232，ESP8266 → 8266），也可手动指定 |
-| 密码 | 可配置，留空表示 sketch 未设密码 |
+| 密码 | 上传时随 IP 一起询问，记住上次输入；认证失败会再给一次机会 |
 | 入口 | 状态栏按钮 / 命令面板 / 快捷键 |
 | 进度 | 状态栏百分比 + 通知区进度条 |
 | 固件来源 | 直接用 IDE 的构建产物，不重复编译 |
@@ -52,15 +52,22 @@ cp esp-ota-uploader-1.0.0.vsix ~/.arduinoIDE/plugins/
 3. 点状态栏的 **OTA** 按钮，或：
    - 命令面板 `Ctrl+Shift+P` → `ESP OTA: Upload to IP`
    - 快捷键 `Ctrl+Alt+U`
-4. 输入设备 IP → 回车
+4. 连着两步输入：
 
-IP 会记住，下次直接回车沿用。
+   ```
+   OTA 目标 IP（1/2）     ← 预填上次的 IP，回车沿用
+   OTA 密码（2/2）        ← 预填已保存的密码（掩码），回车沿用
+   ```
+
+IP 和密码都会记住，之后每次上传就是**两次回车**。
+
+密码框里输入 `-` 表示清除密码（设备没设密码时用）。
 
 ## 配置
 
 | 设置项 | 默认 | 说明 |
 |---|---|---|
-| `espOta.password` | 空 | ArduinoOTA 密码 |
+| `espOta.password` | 空 | ArduinoOTA 密码的初始值（之后以上次输入为准） |
 | `espOta.port` | 0 | 0 = 自动（3232 / 8266） |
 
 ## 为什么没有"工具菜单"入口

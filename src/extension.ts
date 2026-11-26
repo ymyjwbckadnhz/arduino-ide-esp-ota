@@ -177,7 +177,7 @@ function defaultPortFor(sketch: SketchFolder | undefined): number {
 async function askIp(ctx: vscode.ExtensionContext): Promise<string | undefined> {
   const last = ctx.globalState.get<string>(STATE_IP, '');
   const ip = await vscode.window.showInputBox({
-    title: 'OTA 目标 IP',
+    title: 'OTA 目标 IP（1/2）',
     prompt: 'ESP 设备的局域网 IP（会记住上次输入）',
     value: last,
     placeHolder: '例如 192.168.1.50',
@@ -194,16 +194,22 @@ async function askIp(ctx: vscode.ExtensionContext): Promise<string | undefined> 
 }
 
 async function askPassword(ctx: vscode.ExtensionContext): Promise<string | undefined> {
+  const saved = ctx.globalState.get<string>(STATE_PWD, '');
   const p = await vscode.window.showInputBox({
-    title: 'OTA 密码',
-    prompt: '设备启用了 ArduinoOTA 密码，请输入（留空表示无密码）',
+    title: 'OTA 密码（2/2）',
+    prompt: saved
+      ? '已保存密码，直接回车沿用；重新输入可覆盖；输入 - 清除'
+      : '没有密码就直接回车；输入 - 也表示无密码',
     password: true,
-    value: '',
+    value: saved,
     ignoreFocusOut: true,
   });
   if (p === undefined) return undefined;
-  await ctx.globalState.update(STATE_PWD, p);
-  return p;
+
+  const v = p.trim();
+  const final = v === '-' ? '' : p;
+  await ctx.globalState.update(STATE_PWD, final);
+  return final;
 }
 
 // ---------------------------------------------------------------- 主流程
@@ -250,6 +256,11 @@ async function upload(ctx: vscode.ExtensionContext) {
 
     const ip = await askIp(ctx);
     if (!ip) return;
+
+    // 紧接着问密码：已保存的会预填，直接回车沿用
+    const pwdInput = await askPassword(ctx);
+    if (pwdInput === undefined) return;
+    password = pwdInput;
 
     const doUpload = async (pwd: string) => {
       const args = ['-i', ip, '-p', String(port), '-r', '-f', fw];

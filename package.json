@@ -1,0 +1,75 @@
+{
+  "name": "esp-ota-uploader",
+  "displayName": "ESP OTA Uploader",
+  "description": "Upload sketches to ESP32 / ESP8266 over ArduinoOTA with a manually specified IP. Works without mDNS discovery.",
+  "version": "1.0.1",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "arduino",
+    "esp32",
+    "esp8266",
+    "ota",
+    "arduino-ide"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "espOta.upload",
+        "title": "ESP OTA: Upload to IP",
+        "category": "ESP OTA"
+      },
+      {
+        "command": "espOta.setIp",
+        "title": "ESP OTA: Set default IP",
+        "category": "ESP OTA"
+      },
+      {
+        "command": "espOta.setPassword",
+        "title": "ESP OTA: Set password",
+        "category": "ESP OTA"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "espOta.upload",
+        "key": "ctrl+alt+u",
+        "mac": "cmd+alt+u"
+      }
+    ],
+    "configuration": {
+      "title": "ESP OTA Uploader",
+      "properties": {
+        "espOta.password": {
+          "type": "string",
+          "default": "",
+          "description": "ArduinoOTA password. Leave empty if the sketch does not call setPassword()."
+        },
+        "espOta.port": {
+          "type": "number",
+          "default": 0,
+          "description": "OTA UDP port. 0 = auto (3232 for ESP32, 8266 for ESP8266)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^16.18.0",
+    "@types/vscode": "^1.82.0",
+    "typescript": "^5.4.0"
+  }
+}

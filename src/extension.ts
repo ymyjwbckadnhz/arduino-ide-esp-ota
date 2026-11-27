@@ -33,8 +33,14 @@ function setStatus(text: string, tooltip: string) {
 
 // ---------------------------------------------------------------- 工具定位
 
-/** 在 Arduino15 里找 espota（ESP32 用 exe，ESP8266 多为 py） */
-function findEspota(): { exe: string; isPy: boolean } | undefined {
+/**
+ * 在 Arduino15 里找 espota。
+ * 关键：ESP8266 必须用 esp8266 核心自带的 espota.py ——
+ * ESP32 的 espota.exe 和 ESP8266 的认证流程不兼容，会报
+ * "No Answer to our Authentication"。
+ * 所以优先取 chip 对应平台的那一份。
+ */
+function findEspota(chip?: 'esp32' | 'esp8266'): { exe: string; isPy: boolean } | undefined {
   const home = os.homedir();
   const bases = [
     path.join(home, 'AppData', 'Local', 'Arduino15', 'packages'),
@@ -44,9 +50,14 @@ function findEspota(): { exe: string; isPy: boolean } | undefined {
 
   const candidates: { exe: string; isPy: boolean }[] = [];
 
+  // 目标芯片对应的平台排在最前面
+  const order: string[] = chip === 'esp8266' ? ['esp8266', 'esp32']
+                       : chip === 'esp32'   ? ['esp32', 'esp8266']
+                       : ['esp32', 'esp8266'];
+
   for (const base of bases) {
     if (!fs.existsSync(base)) continue;
-    for (const pkg of ['esp32', 'esp8266']) {
+    for (const pkg of order) {
       const hw = path.join(base, pkg, 'hardware', pkg);
       if (!fs.existsSync(hw)) continue;
       let versions: string[] = [];
@@ -67,6 +78,11 @@ function findEspota(): { exe: string; isPy: boolean } | undefined {
     }
   }
 
+  if (chip === 'esp8266') {
+    // ESP8266 用 .py（.exe 那份是 ESP32 的，认证不兼容）
+    const py = candidates.find((c) => c.isPy && c.exe.includes('esp8266'));
+    if (py) return py;
+  }
   return candidates.find((c) => !c.isPy) ?? candidates[0];
 }
 
@@ -85,6 +101,35 @@ function findArduinoCli(): string | undefined {
  * ESP8266 用 8266，ESP32 用 3232；猜错端口 espota 会重试 10 次（约 100 秒）。
  * `arduino-cli board list` 不受 IDE 运行影响，能直接给出 IP → FQBN 的映射。
  */
+async function detectChip(ip: string): Promise<'esp32' | 'esp8266' | undefined> {
+  const cli = findArduinoCli();
+  if (!cli) return undefined;
+  const r = await run(cli, ['board', 'list', '--format', 'json']);
+  if (r.code !== 0) {
+    log(`board list 失败: ${r.code}`);
+    return undefined;
+  }
+  try {
+    const j = JSON.parse(r.out);
+    for (const p of j.detected_ports ?? []) {
+      if ((p.port?.address ?? '') !== ip) continue;
+      const fqbn: string = p.matching_boards?.[0]?.fqbn ?? '';
+      log(`芯片识别: ${ip} → ${fqbn || '(未知)'}`);
+      if (fqbn.includes('esp8266')) return 'esp8266';
+      if (fqbn.includes('esp32')) return 'esp32';
+    }
+  } catch (e) {
+    log(`board list 解析失败: ${e}`);
+  }
+  return undefined;
+}
+
+function portForChip(chip?: 'esp32' | 'esp8266'): number | undefined {
+  if (chip === 'esp8266') return 8266;
+  if (chip === 'esp32') return 3232;
+  return undefined;
+}
+
 async function detectPortForIp(ip: string): Promise<number | undefined> {
   const cli = findArduinoCli();
   if (!cli) return undefined;
@@ -281,12 +326,6 @@ async function upload(ctx: vscode.ExtensionContext) {
     }
     log(`固件: ${fw} (${(fs.statSync(fw).size / 1024).toFixed(0)} KB)`);
 
-    const espota = findEspota();
-    if (!espota) {
-      vscode.window.showErrorMessage('找不到 espota，请确认已安装 ESP32 / ESP8266 开发板支持');
-      return;
-    }
-
     const ip = await askIp(ctx);
     if (!ip) return;
 
@@ -295,9 +334,37 @@ async function upload(ctx: vscode.ExtensionContext) {
     if (pwdInput === undefined) return;
     password = pwdInput;
 
+    // 端口优先级：设置里的固定值 > 该 IP 上次成功的端口 > 按芯片自动识别 > 默认 3232
+    const otherPort = (p: number) => (p === 8266 ? 3232 : 8266);
+    let detected: number | undefined;
+    let chip: 'esp32' | 'esp8266' | undefined;
+    let port = portCfg > 0 ? portCfg : ctx.globalState.get<number>(`espOta.port.${ip}`, 0);
+    if (!port) {
+      chip = await detectChip(ip);
+      detected = portForChip(chip);
+      port = detected ?? defaultPortFor(sketch);
+      log(`端口: ${port}${detected ? '（按芯片识别）' : '（默认值）'}`);
+    } else {
+      log(`端口: ${port}${portCfg > 0 ? '（设置固定）' : '（该 IP 上次成功过）'}`);
+    }
+
+    // espota 要在知道芯片之后才能选（ESP8266 必须用它自己核心里的那份）
+    const espota = findEspota(chip);
+    if (!espota) {
+      vscode.window.showErrorMessage('找不到 espota，请确认已安装 ESP32 / ESP8266 开发板支持');
+      return;
+    }
+    log(`espota: ${espota.exe}${espota.isPy ? ' (python)' : ''}`);
+
     const doUpload = async (pwd: string, usePort: number) => {
-      const args = ['-i', ip, '-p', String(usePort), '-r', '-f', fw];
-      if (pwd) args.splice(4, 0, '-a', pwd);
+      // 两代 espota 的参数不一样：
+      //   ESP32 版：-t 超时 / -r 传完重启
+      //   ESP8266 版（老脚本）：没有 -t，-r 是「显示进度」不是重启
+      // 用错会直接报 "no such option: -t"，所以按具体那一份来拼参数。
+      const isEsp8266Py = espota.isPy && espota.exe.includes('esp8266');
+      const args = ['-i', ip, '-p', String(usePort), '-f', fw];
+      if (pwd) args.push('-a', pwd);
+      if (!isEsp8266Py) args.push('-t', '2', '-r');
 
       log(`目标: ${ip}:${usePort}${pwd ? '  (带密码)' : '  (无密码)'}`);
       log(`执行: ${espota.exe} ${args.join(' ')}`);
@@ -342,20 +409,12 @@ async function upload(ctx: vscode.ExtensionContext) {
       return res;
     };
 
-    // 端口优先级：设置里的固定值 > 该 IP 上次成功的端口 > 按芯片自动识别 > 默认 3232
-    const otherPort = (p: number) => (p === 8266 ? 3232 : 8266);
-    let port = portCfg > 0 ? portCfg : ctx.globalState.get<number>(`espOta.port.${ip}`, 0);
-    if (!port) {
-      port = (await detectPortForIp(ip)) ?? defaultPortFor(sketch);
-      log(`自动选择端口: ${port}`);
-    } else {
-      log(`使用端口: ${port}${portCfg > 0 ? '（设置固定）' : '（该 IP 上次成功过）'}`);
-    }
 
     let result = await doUpload(password, port);
 
     // 端口猜错：espota 会重试 10 次（约 100 秒）才报 No response。换另一个端口再试。
-    if (result.code !== 0 && /No response|Sending invitation/i.test(result.out) && portCfg === 0) {
+    if (result.code !== 0 && !detected && portCfg === 0 &&
+        /No response|Sending invitation/i.test(result.out)) {
       const alt = otherPort(port);
       log(`端口 ${port} 无响应，改用 ${alt} 重试`);
       setStatus('$(sync~spin) OTA 换端口', `${port} 无响应，试 ${alt}`);

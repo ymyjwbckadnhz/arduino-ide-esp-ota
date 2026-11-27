@@ -83,7 +83,11 @@ macOS/Linux:  ~/.arduinoIDE/plugins/
 
 **3. 重启 Arduino IDE**
 
-重启后，状态栏右下角会出现一个 ☁ **OTA** 按钮。
+重启后，状态栏右下角会出现一个 ☁ **OTA** 按钮：
+
+![状态栏 OTA 按钮](images/statusbar.png)
+
+> 截图里它就在「ESP32 Dev Module 在 COM11 上」旁边，不抢地方，随时可点。
 
 > 如果你的 IDE 版本不显示状态栏按钮，用命令面板也一样：
 > `Ctrl+Shift+P` → 输入 `ESP OTA`
@@ -104,16 +108,13 @@ macOS/Linux:  ~/.arduinoIDE/plugins/
 
 **③ 两步输入**
 
-```
-┌─ OTA 目标 IP（1/2）─────────────┐
-│ 192.168.1.50                    │  ← 预填上次的，回车沿用
-└─────────────────────────────────┘
-┌─ OTA 密码（2/2）───────────────┐
-│ ●●●●●●●●                        │  ← 预填已保存的，回车沿用
-│ 已保存密码，直接回车沿用；       │
-│ 重新输入可覆盖；输入 - 清除       │
-└─────────────────────────────────┘
-```
+第一步，填 IP —— 会预填上次用过的：
+
+![OTA 目标 IP](images/ip.png)
+
+第二步，填密码 —— 已经保存过的会预填（显示为圆点）：
+
+![OTA 密码](images/pwd.png)
 
 之后每次都是**两次回车**搞定。
 
@@ -259,6 +260,10 @@ Exception (29): excvaddr=0x00000008
 **GitHub（源码 + Releases 下载）**
 
 https://github.com/ymyjwbckadnhz/arduino-ide-esp-ota
+
+**Gitee 镜像（国内访问更快）**
+
+https://gitee.com/OvO_rain/arduino-ide-esp-ota
 
 **支持范围**：ESP32 全系、ESP8266
 **协议**：MIT

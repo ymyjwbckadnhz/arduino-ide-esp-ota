@@ -31,6 +31,9 @@ espota.exe: error: argument -p/--port: invalid int value: '{upload.port.properti
 | 进度 | 状态栏百分比 + 通知区进度条 |
 | 固件来源 | 直接用 IDE 的构建产物，不重复编译 |
 
+> GitHub：https://github.com/ymyjwbckadnhz/arduino-ide-esp-ota
+> Gitee 镜像：https://gitee.com/OvO_rain/arduino-ide-esp-ota
+
 ## 安装
 
 **没有应用商店**，手动放置：

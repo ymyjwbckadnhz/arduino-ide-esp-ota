@@ -381,12 +381,16 @@ async function upload(ctx: vscode.ExtensionContext) {
 
     // 端口优先级：设置里的固定值 > 该 IP 上次成功的端口 > 按芯片自动识别 > 默认 3232
     const otherPort = (p: number) => (p === 8266 ? 3232 : 8266);
+    // 芯片识别必须无条件先做：即使端口来自缓存，也要靠它挑对 espota 那一份。
+    // （曾经因为端口命中缓存就跳过识别，结果用 ESP32 的 espota 去连 ESP8266，
+    //   认证必然失败，表现为“第一次成功、之后都连不上”。）
+    const chip: 'esp32' | 'esp8266' | undefined =
+      detectChipFromSketch(sketch.sketchPath) ?? (await detectChip(ip));
+    log(`芯片: ${chip ?? '(未识别)'}`);
+
     let detected: number | undefined;
-    let chip: 'esp32' | 'esp8266' | undefined;
     let port = portCfg > 0 ? portCfg : ctx.globalState.get<number>(`espOta.port.${ip}`, 0);
     if (!port) {
-      chip = detectChipFromSketch(sketch.sketchPath) ?? (await detectChip(ip));
-      log(`芯片: ${chip ?? '(未识别)'}`);
       detected = portForChip(chip);
       port = detected ?? defaultPortFor(sketch);
       log(`端口: ${port}${detected ? '（按芯片识别）' : '（默认值）'}`);

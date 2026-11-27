@@ -33,6 +33,8 @@ espota.exe: error: argument -p/--port: invalid int value: '{upload.port.properti
 
 > GitHub：https://github.com/ymyjwbckadnhz/arduino-ide-esp-ota
 > Gitee 镜像：https://gitee.com/OvO_rain/arduino-ide-esp-ota
+>
+> Gitee 为镜像，可能滞后于 GitHub，**以 GitHub 为准**。
 
 ## 安装
 

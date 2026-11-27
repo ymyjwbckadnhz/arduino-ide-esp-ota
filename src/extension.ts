@@ -90,6 +90,18 @@ function findPython(): string {
   return process.platform === 'win32' ? 'python' : 'python3';
 }
 
+/** 找与目标 IP 同网段的本机 IPv4（espota.py 需要 -I 才能稳定 bind 本地端口） */
+function localIpFor(target: string): string | undefined {
+  const prefix = target.split('.').slice(0, 3).join('.') + '.';
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const a of addrs ?? []) {
+      if (a.family === 'IPv4' && !a.internal && a.address.startsWith(prefix)) {
+        return a.address;
+      }
+    }
+  }
+  return undefined;
+}
 function findArduinoCli(): string | undefined {
   const c = 'C:\\Program Files\\Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe';
   if (fs.existsSync(c)) return c;
@@ -124,6 +136,39 @@ async function detectChip(ip: string): Promise<'esp32' | 'esp8266' | undefined> 
   return undefined;
 }
 
+/**
+ * 从 sketch 源码里判断芯片型号。
+ *
+ * 比查 `board list` 可靠：后者依赖 mDNS 发现，设备一旦关了 mDNS
+ * （比如 ESP8266 为了省内存把 ArduinoOTA 的 mDNS 关掉）就查不到。
+ * 源码里的 include 是确定的：ESP8266 用 <ESP8266WiFi.h>，ESP32 用 <WiFi.h>。
+ */
+function detectChipFromSketch(dir: string): 'esp32' | 'esp8266' | undefined {
+  let text = '';
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (!/\.(ino|cpp|h|hpp)$/i.test(f)) continue;
+      const p = path.join(dir, f);
+      try {
+        if (fs.statSync(p).size > 512 * 1024) continue;
+        text += fs.readFileSync(p, 'utf8');
+      } catch {
+        /* ignore */
+      }
+      if (text.length > 512 * 1024) break;
+    }
+  } catch {
+    return undefined;
+  }
+
+  if (/ESP8266WiFi\.h|ESP8266WebServer\.h|ESP8266mDNS\.h|ESP8266HTTPClient\.h|analogWriteRange|#include\s*<ESP8266/.test(text)) {
+    return 'esp8266';
+  }
+  if (/#include\s*<WiFi\.h>|esp32-hal|ESP32-HUB75|#include\s*<ESP32|driver\/gpio\.h/.test(text)) {
+    return 'esp32';
+  }
+  return undefined;
+}
 function portForChip(chip?: 'esp32' | 'esp8266'): number | undefined {
   if (chip === 'esp8266') return 8266;
   if (chip === 'esp32') return 3232;
@@ -340,7 +385,8 @@ async function upload(ctx: vscode.ExtensionContext) {
     let chip: 'esp32' | 'esp8266' | undefined;
     let port = portCfg > 0 ? portCfg : ctx.globalState.get<number>(`espOta.port.${ip}`, 0);
     if (!port) {
-      chip = await detectChip(ip);
+      chip = detectChipFromSketch(sketch.sketchPath) ?? (await detectChip(ip));
+      log(`芯片: ${chip ?? '(未识别)'}`);
       detected = portForChip(chip);
       port = detected ?? defaultPortFor(sketch);
       log(`端口: ${port}${detected ? '（按芯片识别）' : '（默认值）'}`);
@@ -364,7 +410,14 @@ async function upload(ctx: vscode.ExtensionContext) {
       const isEsp8266Py = espota.isPy && espota.exe.includes('esp8266');
       const args = ['-i', ip, '-p', String(usePort), '-f', fw];
       if (pwd) args.push('-a', pwd);
-      if (!isEsp8266Py) args.push('-t', '2', '-r');
+
+      if (isEsp8266Py) {
+        // 不指定本机 IP 时 espota.py 选随机端口可能 bind 失败，报 "Listen Failed"
+        const lip = localIpFor(ip);
+        if (lip) args.push('-I', lip);
+      } else {
+        args.push('-t', '2', '-r');
+      }
 
       log(`目标: ${ip}:${usePort}${pwd ? '  (带密码)' : '  (无密码)'}`);
       log(`执行: ${espota.exe} ${args.join(' ')}`);

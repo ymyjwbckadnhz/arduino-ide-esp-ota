@@ -469,6 +469,15 @@ async function upload(ctx: vscode.ExtensionContext) {
 
     let result = await doUpload(password, port);
 
+    // 设备每次 OTA 后都会重启，重启窗口内邀请没人应 —— 自动重试，别让用户干等。
+    for (let attempt = 0; attempt < 2 && result.code !== 0; attempt++) {
+      if (!/No Answer|No response|Sending invitation/i.test(result.out)) break;
+      log(`无应答，5 秒后自动重试（${attempt + 1}/2）`);
+      setStatus('$(sync~spin) OTA 重试中', '设备可能正在重启');
+      await new Promise((r) => setTimeout(r, 5000));
+      result = await doUpload(password, port);
+    }
+
     // 端口猜错：espota 会重试 10 次（约 100 秒）才报 No response。换另一个端口再试。
     if (result.code !== 0 && !detected && portCfg === 0 &&
         /No response|Sending invitation/i.test(result.out)) {
